@@ -60,7 +60,22 @@ func main() {
 		if err := m.Force(version); err != nil {
 			log.Fatalf("Failed to force migration version: %v", err)
 		}
+	case "version":
+		version, dirty, err := m.Version()
+		if err != nil {
+			if err == migrate.ErrNilVersion {
+				log.Println("No migrations applied yet")
+			} else {
+				log.Fatalf("Failed to get migration version: %v", err)
+			}
+		} else {
+			status := "clean"
+			if dirty {
+				status = "dirty"
+			}
+			log.Printf("Current migration version: %d, status: %s", version, status)
+		}
 	default:
-		log.Fatalf("Unknown command: %s", command)
+		log.Fatalf("Unknown command: %s. Available commands: up, down, force, version", command)
 	}
 }
