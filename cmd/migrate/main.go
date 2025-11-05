@@ -1,0 +1,66 @@
+package main
+
+import (
+	"flag"
+	"log"
+	"os"
+	"strconv"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+)
+
+func main() {
+	var (
+		dsn            string
+		migrationsPath string
+		command        string
+		versionStr     string
+	)
+
+	flag.StringVar(&dsn, "dsn", "", "Database connection string")
+	flag.StringVar(&migrationsPath, "migrations-path", "file://migrations", "Path to migrations")
+	flag.StringVar(&command, "command", "up", "Migration command (up, down, force, version)")
+	flag.StringVar(&versionStr, "version", "", "Version for force command")
+	flag.Parse()
+
+	if dsn == "" {
+		dsn = os.Getenv("DATABASE_DSN")
+	}
+	if dsn == "" {
+		log.Fatal("DSN is required. Use -dsn flag or DATABASE_DSN environment variable")
+	}
+
+	log.Printf("Running migration command: %s", command)
+
+	m, err := migrate.New(migrationsPath, dsn)
+	if err != nil {
+		log.Fatalf("Failed to initialize migrations: %v", err)
+	}
+	defer m.Close()
+
+	switch command {
+	case "up":
+		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+			log.Fatalf("Failed to apply migrations: %v", err)
+		}
+	case "down":
+		if err := m.Down(); err != nil && err != migrate.ErrNoChange {
+			log.Fatalf("Failed to rollback migrations: %v", err)
+		}
+	case "force":
+		if versionStr == "" {
+			log.Fatal("Version is required for force command (use -version flag)")
+		}
+		version, err := strconv.Atoi(versionStr)
+		if err != nil {
+			log.Fatalf("Invalid version format: %v", err)
+		}
+		if err := m.Force(version); err != nil {
+			log.Fatalf("Failed to force migration version: %v", err)
+		}
+	default:
+		log.Fatalf("Unknown command: %s", command)
+	}
+}

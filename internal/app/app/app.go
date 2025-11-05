@@ -6,11 +6,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
 	"go.uber.org/zap"
 
 	"github.com/Te8va/GophKeeper/internal/app/config"
@@ -71,48 +69,8 @@ func (a *App) initStorage() error {
 	}
 }
 
-// func (a *App) InitPostgresStorage(ctx context.Context) error {
-// 	a.logger.Infoln("Using PostgreSQL as storage")
-
-// 	m, err := migrate.New("file://migrations", a.cfg.DatabaseDSN)
-// 	if err != nil {
-// 		a.logger.Fatalw("Failed to initialize migrations", "error", err)
-// 	}
-
-// 	if err := repository.ApplyMigrations(m); err != nil {
-// 		a.logger.Fatalw("Failed to apply migrations", "error", err)
-// 	}
-
-// 	pool, err := repository.GetPgxPool(ctx, a.cfg.DatabaseDSN)
-// 	if err != nil {
-// 		a.logger.Fatalw("Failed to create Postgres connection pool", "error", err)
-// 	}
-
-// 	repo := repository.NewDataRepository(pool)
-
-// 	repoAuth := repository.NewAuthorizationRepository(pool)
-
-// 	a.saver = repo
-// 	a.getter = repo
-// 	a.deleter = repo
-// 	a.auth = repoAuth
-
-// 	return nil
-// }
-
 func (a *App) InitPostgresStorage(ctx context.Context) error {
 	a.logger.Infoln("Using PostgreSQL as storage")
-
-	m, err := migrate.New("file://migrations", a.cfg.DatabaseDSN)
-	if err != nil {
-		a.logger.Errorw("Failed to initialize migrations", "error", err)
-		return fmt.Errorf("failed to initialize migrations: %w", err)
-	}
-
-	if err := repository.ApplyMigrations(m); err != nil {
-		a.logger.Errorw("Failed to apply migrations", "error", err)
-		return fmt.Errorf("failed to apply migrations: %w", err)
-	}
 
 	pool, err := repository.GetPgxPool(ctx, a.cfg.DatabaseDSN)
 	if err != nil {
@@ -179,45 +137,34 @@ func (a *App) Run() error {
 		}
 	}()
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
+	defer stop()
+
+	serverErr := make(chan error, 1)
 	go func() {
 		a.logger.Infow("Server started", "addr", a.cfg.ServerAddress)
-
 		if err := a.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			a.logger.Fatalw("ListenAndServe failed", "error", err)
+			serverErr <- err
+		} else {
+			serverErr <- nil
 		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
-
-	<-quit
-
-	a.logger.Infoln("Shutting down server...")
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := a.httpServer.Shutdown(shutdownCtx); err != nil {
-			a.logger.Errorw("HTTP server shutdown failed", "error", err)
-		}
-	}()
-
-	waitGroupChan := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(waitGroupChan)
 	}()
 
 	select {
-	case <-waitGroupChan:
-		a.logger.Infoln("All servers finished cleanly")
-	case <-time.After(3 * time.Second):
-		a.logger.Warn("Some servers did not finish in time")
+	case <-ctx.Done():
+		a.logger.Infoln("Received shutdown signal, shutting down gracefully...")
+	case err := <-serverErr:
+		if err != nil {
+			a.logger.Errorw("Server error", "error", err)
+			return err
+		}
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := a.httpServer.Shutdown(shutdownCtx); err != nil {
+		a.logger.Errorw("HTTP server shutdown failed", "error", err)
+		return err
 	}
 
 	a.logger.Infoln("Server shut down successfully")

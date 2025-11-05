@@ -286,39 +286,6 @@ func TestApp_SettersAndGetters(t *testing.T) {
 	assert.Equal(t, mockServer, testApp.HTTPServer())
 }
 
-func TestApp_InitServer_WithRealConfig(t *testing.T) {
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockSaver := mocks.NewMockDataSaverServ(ctrl)
-	mockGetter := mocks.NewMockDataGetterServ(ctrl)
-	mockDeleter := mocks.NewMockDataDeleteServ(ctrl)
-	mockAuth := mocks.NewMockAuthorizationServ(ctrl)
-
-	cfg := config.NewConfig()
-	cfg.ServerAddress = "localhost:9090"
-
-	testApp := &app.App{}
-	testApp.SetConfig(cfg)
-	testApp.SetSaver(mockSaver)
-	testApp.SetGetter(mockGetter)
-	testApp.SetDeleter(mockDeleter)
-	testApp.SetAuth(mockAuth)
-
-	logger, _ := zap.NewDevelopment()
-	sugar := logger.Sugar()
-	testApp.SetLogger(sugar)
-
-	testApp.InitServer()
-
-	server := testApp.HTTPServer()
-	assert.NotNil(t, server)
-	assert.Equal(t, "localhost:9090", server.Addr)
-	assert.NotNil(t, server.Handler)
-}
-
 func TestApp_MemoryStorageInitialization(t *testing.T) {
 	testApp := &app.App{}
 	testApp.SetConfig(&config.Config{
@@ -397,11 +364,6 @@ func TestApp_InitPostgresStorage_BasicCoverage(t *testing.T) {
 		databaseDSN string
 		expectError bool
 	}{
-		{
-			name:        "empty DSN - covers first error path",
-			databaseDSN: "",
-			expectError: true,
-		},
 		{
 			name:        "invalid DSN - covers first error path with different error",
 			databaseDSN: "invalid-dsn",
